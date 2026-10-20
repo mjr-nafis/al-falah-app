@@ -2029,26 +2029,9 @@ const DEFAULT_HOME_SETTINGS = {
   established_text: "স্থাপিত: ২০২৫ খ্রিঃ • Since 2025"
 };
 
-    // Application state
-    let state = {
-      constitution: JSON.parse(localStorage.getItem('al_falah_constitution') || 'null') || [...INITIAL_CONSTITUTION],
-      constitutionMeta: JSON.parse(localStorage.getItem('al_falah_constitution_meta') || 'null') || Object.assign({}, DEFAULT_CONSTITUTION_META),
-      homeSettings: JSON.parse(localStorage.getItem('al_falah_home_settings') || 'null') || Object.assign({}, DEFAULT_HOME_SETTINGS),
-      members: JSON.parse(localStorage.getItem('al_falah_members') || 'null') || [...INITIAL_MEMBERS],
-      subscriptions: JSON.parse(localStorage.getItem('al_falah_subscriptions') || 'null') || [...INITIAL_SUBSCRIPTIONS],
-      expenses: JSON.parse(localStorage.getItem('al_falah_expenses') || 'null') || [...INITIAL_EXPENSES],
-      books: JSON.parse(localStorage.getItem('al_falah_books') || 'null') || [...INITIAL_BOOKS],
-      loans: JSON.parse(localStorage.getItem('al_falah_loans') || 'null') || [...INITIAL_LOANS],
-      activities: JSON.parse(localStorage.getItem('al_falah_activities') || 'null') || [...INITIAL_ACTIVITIES],
-      documents: JSON.parse(localStorage.getItem('al_falah_docs') || 'null') || [...INITIAL_DOCUMENTS],
-      currentUser: JSON.parse(localStorage.getItem('al_falah_current_user') || 'null'),
-      currentTab: 'home',
-      currentFilter: 'all',
-      chartInstance: null
-    };
 
     // ==========================================
-    // NORMALIZATION & RBAC DEFINITIONS
+    // DATA NORMALIZATION & COMPATIBILITY HELPERS
     // ==========================================
     function toEnglishDigits(str) {
       if (!str) return '';
@@ -2066,6 +2049,171 @@ const DEFAULT_HOME_SETTINGS = {
       if (s.includes('.')) s = s.split('.')[0].trim();
       return s;
     }
+
+    function normalizeMember(m, idx) {
+      if (!m || typeof m !== 'object') return null;
+      const id = String(m.id || m.ID || m.member_id || m.Member_ID || (1100 + idx)).trim();
+      const name = String(m.name || m.Name || m.full_name || m.Full_Name || m['সদস্যের নাম'] || m['নাম'] || 'সদস্য').trim();
+      if (!id && !name) return null;
+
+      const tier = String(m.tier || m.Tier || m.membership_tier || m.Membership_Tier || 'সাধারণ সদস্য').trim();
+      const designation = String(m.designation || m.Designation || 'সদস্য').trim();
+      const phone = String(m.phone || m.Phone || m.mobile || '-').trim();
+      const blood = String(m.blood || m.Blood || m.blood_group || m.Blood_Group || '-').trim();
+      const address = String(m.address || m.Address || 'খরপা, কিচক, শিবগঞ্জ, বগুড়া').trim();
+      const join_date = String(m.join_date || m.Join_Date || m.joinDate || '2025-04-01').trim();
+      const status = String(m.status || m.Status || 'Active').trim();
+      const total_paid = Number(m.total_paid || m.Total_Paid || m.totalPaid || 0);
+      const role = String(m.role || m.Role || 'viewer').toLowerCase().trim();
+      const pin = normalizePin(m.pin || m.PIN || '');
+
+      return {
+        id, name, tier, designation, phone, blood, address, join_date, status, total_paid, role, pin
+      };
+    }
+
+    function normalizeSubscription(s, idx) {
+      if (!s || typeof s !== 'object') return null;
+      const id = String(s.id || s.ID || s.payment_id || s.Payment_ID || s.receipt_no || s['রশিদ নং'] || ('SUB-' + (1001 + idx))).trim();
+      const member_id = String(s.member_id || s.Member_ID || s.memberId || s.mid || s['সদস্য আইডি'] || '').trim();
+
+      // Resolve member name from all key variations, or look up from members pool
+      let name = s.name || s.Name || s.member_name || s.Member_Name || s.full_name || s.Full_Name || s['সদস্যের নাম'] || s['নাম'] || '';
+      if ((!name || name === 'undefined') && member_id) {
+        const pool = (typeof state !== 'undefined' && state.members && state.members.length > 0) ? state.members : INITIAL_MEMBERS;
+        const found = pool.find(m => String(m.id).trim() === member_id);
+        if (found && found.name) name = found.name;
+      }
+      if (!name || name === 'undefined') name = 'সাধারণ সদস্য';
+
+      const month = String(s.month || s.Month || s['মাস'] || 'April').trim();
+      const year = Number(s.year || s.Year || s['বছর'] || 2025);
+      const amount = Number(s.amount || s.Amount || s['টাকা'] || s['পরিমাণ'] || 0);
+
+      let date = s.date || s.Date || s.payment_date || s.Payment_Date || s.pay_date || s['তারিখ'] || '';
+      if (date instanceof Date) {
+        date = date.toISOString().split('T')[0];
+      } else if (typeof date === 'string' && date.includes('T')) {
+        date = date.split('T')[0];
+      }
+      if (!date || date === 'undefined') date = '2025-04-01';
+
+      const method = String(s.method || s.Method || s.payment_method || s.Payment_Method || s['পদ্ধতি'] || 'Cash').trim();
+      let trx = String(s.trx || s.Trx || s.trxid || s.TrxID || s.transaction_id || s['ট্রানজেকশন'] || 'N/A').trim();
+      if (!trx || trx === 'undefined') trx = 'N/A';
+
+      let receiver = String(s.receiver || s.Receiver || s.received_by || s.Received_By || s['আদায়কারী'] || s['গ্রাহক'] || 'মোঃ কামরুল হাসান').trim();
+      if (!receiver || receiver === 'undefined') receiver = 'মোঃ কামরুল হাসান';
+
+      return {
+        id,
+        payment_id: id,
+        member_id,
+        name: String(name),
+        member_name: String(name),
+        month,
+        year,
+        amount,
+        date: String(date),
+        payment_date: String(date),
+        method,
+        payment_method: method,
+        trx,
+        trxid: trx,
+        receiver,
+        received_by: receiver
+      };
+    }
+
+    function normalizeExpense(e, idx) {
+      if (!e || typeof e !== 'object') return null;
+      const id = String(e.id || e.ID || e.expense_id || e.Expense_ID || e.voucher_no || e['ভাউচার নং'] || ('EXP-' + (2001 + idx))).trim();
+      
+      let date = e.date || e.Date || e.expense_date || e.Expense_Date || e['তারিখ'] || '';
+      if (date instanceof Date) {
+        date = date.toISOString().split('T')[0];
+      } else if (typeof date === 'string' && date.includes('T')) {
+        date = date.split('T')[0];
+      }
+      if (!date || date === 'undefined') date = '2025-06-26';
+
+      const category = String(e.category || e.Category || e['খাত'] || 'অফিস ও মুদ্রণ').trim();
+      const amount = Number(e.amount || e.Amount || e['টাকা'] || e['পরিমাণ'] || 0);
+      const description = String(e.description || e.Description || e['বিবরণ'] || '').trim();
+      const spent_by = String(e.spent_by || e.Spent_By || e.spentBy || e['ব্যয়কারী'] || 'মোঃ তানভীর আজম ত্বহা').trim();
+      const method = String(e.method || e.Method || e.payment_method || e.Payment_Method || e['পদ্ধতি'] || 'Cash').trim();
+
+      return {
+        id,
+        expense_id: id,
+        date: String(date),
+        expense_date: String(date),
+        category,
+        amount,
+        description,
+        spent_by,
+        method
+      };
+    }
+
+    function normalizeBook(b, idx) {
+      if (!b || typeof b !== 'object') return null;
+      const id = String(b.id || b.ID || b.book_id || b.Book_ID || ('BK-' + (idx < 9 ? '0' + (idx+1) : (idx+1)))).trim();
+      const title = String(b.title || b.Title || b.book_title || b.Book_Title || '').trim();
+      if (!title) return null;
+      const author = String(b.author || b.Author || '').trim();
+      const publisher = String(b.publisher || b.Publisher || 'সাধারণ প্রকাশন').trim();
+      const category = String(b.category || b.Category || 'ঈমান বিষয়ক').trim();
+      const copies = Number(b.copies || b.Copies || b.total_copies || b.Total_Copies || 1);
+      const available = Number(b.available !== undefined ? b.available : (b.Available !== undefined ? b.Available : (b.available_copies !== undefined ? b.available_copies : copies)));
+      const shelf = String(b.shelf || b.Shelf || b.shelf_location || b.Shelf_Location || 'Shelf A1').trim();
+      let price = String(b.price || b.Price || '১০০৳').trim();
+      if (price && !price.endsWith('৳')) price += '৳';
+
+      return { id, title, author, publisher, category, copies, available, shelf, price };
+    }
+
+    function normalizeLoan(l, idx) {
+      if (!l || typeof l !== 'object') return null;
+      const id = String(l.id || l.ID || l.loan_id || l.Loan_ID || ('LN-' + (3001 + idx))).trim();
+      const book_id = String(l.book_id || l.Book_ID || l.bookId || '').trim();
+      const book_title = String(l.book_title || l.Book_Title || l.bookTitle || '').trim();
+      const member_id = String(l.member_id || l.Member_ID || l.memberId || '').trim();
+      let borrower = String(l.borrower || l.Borrower || l.borrower_name || l.Borrower_Name || '').trim();
+      if (!borrower && member_id) {
+        const pool = (typeof state !== 'undefined' && state.members) ? state.members : INITIAL_MEMBERS;
+        const mem = pool.find(m => String(m.id).trim() === member_id);
+        if (mem) borrower = mem.name;
+      }
+      const issue_date = String(l.issue_date || l.Issue_Date || l.issueDate || '').trim();
+      const due_date = String(l.due_date || l.Due_Date || l.dueDate || '').trim();
+      const status = String(l.status || l.Status || l.loan_status || l.Loan_Status || 'Borrowed').trim();
+
+      return { id, book_id, book_title, member_id, borrower, issue_date, due_date, status };
+    }
+
+    // Application state
+    let state = {
+      constitution: JSON.parse(localStorage.getItem('al_falah_constitution') || 'null') || [...INITIAL_CONSTITUTION],
+      constitutionMeta: JSON.parse(localStorage.getItem('al_falah_constitution_meta') || 'null') || Object.assign({}, DEFAULT_CONSTITUTION_META),
+      homeSettings: JSON.parse(localStorage.getItem('al_falah_home_settings') || 'null') || Object.assign({}, DEFAULT_HOME_SETTINGS),
+      members: (JSON.parse(localStorage.getItem('al_falah_members') || 'null') || [...INITIAL_MEMBERS]).map((m, idx) => normalizeMember(m, idx)).filter(Boolean),
+      subscriptions: (JSON.parse(localStorage.getItem('al_falah_subscriptions') || 'null') || [...INITIAL_SUBSCRIPTIONS]).map((s, idx) => normalizeSubscription(s, idx)).filter(Boolean),
+      expenses: (JSON.parse(localStorage.getItem('al_falah_expenses') || 'null') || [...INITIAL_EXPENSES]).map((e, idx) => normalizeExpense(e, idx)).filter(Boolean),
+      books: (JSON.parse(localStorage.getItem('al_falah_books') || 'null') || [...INITIAL_BOOKS]).map((b, idx) => normalizeBook(b, idx)).filter(Boolean),
+      loans: (JSON.parse(localStorage.getItem('al_falah_loans') || 'null') || [...INITIAL_LOANS]).map((l, idx) => normalizeLoan(l, idx)).filter(Boolean),
+      activities: JSON.parse(localStorage.getItem('al_falah_activities') || 'null') || [...INITIAL_ACTIVITIES],
+      documents: JSON.parse(localStorage.getItem('al_falah_docs') || 'null') || [...INITIAL_DOCUMENTS],
+      currentUser: JSON.parse(localStorage.getItem('al_falah_current_user') || 'null'),
+      currentTab: 'home',
+      currentFilter: 'all',
+      chartInstance: null
+    };
+
+    // ==========================================
+    // RBAC PERMISSIONS & ROLE DEFINITIONS
+    // ==========================================
+
 
     function getPermissions(roleStr, designationStr, memberId) {
       const r = (roleStr || '').toString().toLowerCase().trim();
@@ -2530,10 +2678,38 @@ const DEFAULT_HOME_SETTINGS = {
               localStorage.setItem('al_falah_members', JSON.stringify(state.members));
             }
           }
-          if (data.subscriptions && data.subscriptions.length > 0) state.subscriptions = data.subscriptions;
-          if (data.expenses && data.expenses.length > 0) state.expenses = data.expenses;
-          if (data.books && data.books.length > 0) state.books = data.books;
-          if (data.loans && data.loans.length > 0) state.loans = data.loans;
+          // সাবস্ক্রিপশন / চাঁদা ডাটা নরমালাইজেশন
+          if (data.subscriptions && Array.isArray(data.subscriptions) && data.subscriptions.length > 0) {
+            const mappedSubs = data.subscriptions.map((s, idx) => normalizeSubscription(s, idx)).filter(Boolean);
+            if (mappedSubs.length > 0) {
+              state.subscriptions = mappedSubs;
+              localStorage.setItem('al_falah_subscriptions', JSON.stringify(state.subscriptions));
+            }
+          }
+          // ব্যয় ভাউচার ডাটা নরমালাইজেশন
+          if (data.expenses && Array.isArray(data.expenses) && data.expenses.length > 0) {
+            const mappedExps = data.expenses.map((e, idx) => normalizeExpense(e, idx)).filter(Boolean);
+            if (mappedExps.length > 0) {
+              state.expenses = mappedExps;
+              localStorage.setItem('al_falah_expenses', JSON.stringify(state.expenses));
+            }
+          }
+          // পাঠাগার বই ডাটা নরমালাইজেশন
+          if (data.books && Array.isArray(data.books) && data.books.length > 0) {
+            const mappedBooks = data.books.map((b, idx) => normalizeBook(b, idx)).filter(Boolean);
+            if (mappedBooks.length > 0) {
+              state.books = mappedBooks;
+              localStorage.setItem('al_falah_books', JSON.stringify(state.books));
+            }
+          }
+          // বই ধার / লোন ডাটা নরমালাইজেশন
+          if (data.loans && Array.isArray(data.loans) && data.loans.length > 0) {
+            const mappedLoans = data.loans.map((l, idx) => normalizeLoan(l, idx)).filter(Boolean);
+            if (mappedLoans.length > 0) {
+              state.loans = mappedLoans;
+              localStorage.setItem('al_falah_loans', JSON.stringify(state.loans));
+            }
+          }
 
           // সিঙ্ক: সাইট সেটিংস ও কার্যক্রম
           if (data.settings && Object.keys(data.settings).length > 0) {
@@ -3124,35 +3300,60 @@ const DEFAULT_HOME_SETTINGS = {
       const expTbody = document.getElementById('expensesTableBody');
 
       if (incTbody) {
-        incTbody.innerHTML = state.subscriptions.map(s => `
-          <tr class="hover:bg-slate-50/80 transition-colors">
-            <td class="px-4 py-3 font-semibold text-slate-500 whitespace-nowrap">${s.id}</td>
-            <td class="px-4 py-3 font-bold text-slate-800 whitespace-nowrap">${s.name}</td>
-            <td class="px-4 py-3 whitespace-nowrap">${s.month} ${s.year}</td>
-            <td class="px-4 py-3 whitespace-nowrap text-slate-500">${s.date}</td>
-            <td class="px-4 py-3 whitespace-nowrap">
-              <span class="inline-flex items-center gap-1 font-semibold text-slate-700">
-                <span class="w-1.5 h-1.5 rounded-full ${s.method === 'bKash' ? 'bg-pink-500' : 'bg-emerald-500'}"></span>
-                ${s.method} ${s.trx !== 'N/A' ? `(${s.trx})` : ''}
-              </span>
-            </td>
-            <td class="px-4 py-3 text-right font-extrabold text-emerald-700 whitespace-nowrap">৳${s.amount}</td>
-            <td class="px-4 py-3 text-center whitespace-nowrap text-slate-500">${s.receiver || '-'}</td>
-          </tr>
-        `).join('');
+        incTbody.innerHTML = state.subscriptions.map((s, idx) => {
+          const subId = (s.id && s.id !== 'undefined') ? s.id : (s.payment_id || ('SUB-' + (1001 + idx)));
+          let subName = (s.name && s.name !== 'undefined') ? s.name : (s.member_name || '');
+          if (!subName || subName === 'undefined') {
+            const mid = String(s.member_id || '').trim();
+            const m = state.members && state.members.find(x => String(x.id).trim() === mid);
+            subName = m ? m.name : 'সাধারণ সদস্য';
+          }
+          const subMonthYear = (s.month && s.year) ? `${s.month} ${s.year}` : (s.month || s.year || '2025');
+          const subDate = (s.date && s.date !== 'undefined') ? s.date : (s.payment_date || '-');
+          const subMethod = (s.method && s.method !== 'undefined') ? s.method : 'Cash';
+          const trxVal = (s.trx && s.trx !== 'undefined' && s.trx !== 'N/A') ? `(${s.trx})` : '';
+          const subAmount = Number(s.amount || s.Amount || 0);
+          const subReceiver = (s.receiver && s.receiver !== 'undefined') ? s.receiver : (s.received_by || '-');
+
+          return `
+            <tr class="hover:bg-slate-50/80 transition-colors">
+              <td class="px-4 py-3 font-semibold text-slate-500 whitespace-nowrap">${subId}</td>
+              <td class="px-4 py-3 font-bold text-slate-800 whitespace-nowrap">${subName}</td>
+              <td class="px-4 py-3 whitespace-nowrap">${subMonthYear}</td>
+              <td class="px-4 py-3 whitespace-nowrap text-slate-500">${subDate}</td>
+              <td class="px-4 py-3 whitespace-nowrap">
+                <span class="inline-flex items-center gap-1 font-semibold text-slate-700">
+                  <span class="w-1.5 h-1.5 rounded-full ${subMethod === 'bKash' ? 'bg-pink-500' : 'bg-emerald-500'}"></span>
+                  ${subMethod} ${trxVal}
+                </span>
+              </td>
+              <td class="px-4 py-3 text-right font-extrabold text-emerald-700 whitespace-nowrap">৳${subAmount}</td>
+              <td class="px-4 py-3 text-center whitespace-nowrap text-slate-500">${subReceiver}</td>
+            </tr>
+          `;
+        }).join('');
       }
 
       if (expTbody) {
-        expTbody.innerHTML = state.expenses.map(e => `
-          <tr class="hover:bg-slate-50/80 transition-colors">
-            <td class="px-4 py-3 font-semibold text-slate-500 whitespace-nowrap">${e.id}</td>
-            <td class="px-4 py-3 text-slate-500 whitespace-nowrap">${e.date}</td>
-            <td class="px-4 py-3 font-bold text-slate-800 whitespace-nowrap">${e.category}</td>
-            <td class="px-4 py-3 text-slate-600">${e.description}</td>
-            <td class="px-4 py-3 text-slate-500 whitespace-nowrap">${e.spent_by}</td>
-            <td class="px-4 py-3 text-right font-extrabold text-amber-700 whitespace-nowrap">৳${e.amount}</td>
-          </tr>
-        `).join('');
+        expTbody.innerHTML = state.expenses.map((e, idx) => {
+          const expId = (e.id && e.id !== 'undefined') ? e.id : (e.expense_id || ('EXP-' + (2001 + idx)));
+          const expDate = (e.date && e.date !== 'undefined') ? e.date : (e.expense_date || '-');
+          const expCat = (e.category && e.category !== 'undefined') ? e.category : 'সাধারণ ব্যয়';
+          const expDesc = (e.description && e.description !== 'undefined') ? e.description : '-';
+          const expSpent = (e.spent_by && e.spent_by !== 'undefined') ? e.spent_by : '-';
+          const expAmount = Number(e.amount || e.Amount || 0);
+
+          return `
+            <tr class="hover:bg-slate-50/80 transition-colors">
+              <td class="px-4 py-3 font-semibold text-slate-500 whitespace-nowrap">${expId}</td>
+              <td class="px-4 py-3 text-slate-500 whitespace-nowrap">${expDate}</td>
+              <td class="px-4 py-3 font-bold text-slate-800 whitespace-nowrap">${expCat}</td>
+              <td class="px-4 py-3 text-slate-600">${expDesc}</td>
+              <td class="px-4 py-3 text-slate-500 whitespace-nowrap">${expSpent}</td>
+              <td class="px-4 py-3 text-right font-extrabold text-amber-700 whitespace-nowrap">৳${expAmount}</td>
+            </tr>
+          `;
+        }).join('');
       }
     }
 
