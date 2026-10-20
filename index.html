@@ -2034,9 +2034,9 @@ const DEFAULT_HOME_SETTINGS = {
       constitution: JSON.parse(localStorage.getItem('al_falah_constitution') || 'null') || [...INITIAL_CONSTITUTION],
       constitutionMeta: JSON.parse(localStorage.getItem('al_falah_constitution_meta') || 'null') || Object.assign({}, DEFAULT_CONSTITUTION_META),
       homeSettings: JSON.parse(localStorage.getItem('al_falah_home_settings') || 'null') || Object.assign({}, DEFAULT_HOME_SETTINGS),
-      members: [...INITIAL_MEMBERS],
-      subscriptions: [...INITIAL_SUBSCRIPTIONS],
-      expenses: [...INITIAL_EXPENSES],
+      members: JSON.parse(localStorage.getItem('al_falah_members') || 'null') || [...INITIAL_MEMBERS],
+      subscriptions: JSON.parse(localStorage.getItem('al_falah_subscriptions') || 'null') || [...INITIAL_SUBSCRIPTIONS],
+      expenses: JSON.parse(localStorage.getItem('al_falah_expenses') || 'null') || [...INITIAL_EXPENSES],
       books: JSON.parse(localStorage.getItem('al_falah_books') || 'null') || [...INITIAL_BOOKS],
       loans: JSON.parse(localStorage.getItem('al_falah_loans') || 'null') || [...INITIAL_LOANS],
       activities: JSON.parse(localStorage.getItem('al_falah_activities') || 'null') || [...INITIAL_ACTIVITIES],
@@ -2503,29 +2503,32 @@ const DEFAULT_HOME_SETTINGS = {
         clearTimeout(timeoutId);
         const data = await res.json();
         if (data.status === 'success') {
-          if (data.members && data.members.length > 0) {
-            data.members.forEach(cloudMem => {
-              const mid = String(cloudMem.id).trim();
-              const sheetRole = (cloudMem.role || '').toString().toLowerCase().trim();
-              const sheetPin = normalizePin(cloudMem.pin);
+          if (data.members && Array.isArray(data.members) && data.members.length > 0) {
+            // ফিল্টার করে শুধুমাত্র ভ্যালিড মেম্বার আইডি ও নাম সম্পন্ন রো রাখা
+            const validCloudMembers = data.members.filter(m => m && (m.id || m.name));
+            if (validCloudMembers.length > 0) {
+              validCloudMembers.forEach(cloudMem => {
+                const mid = String(cloudMem.id).trim();
+                const sheetRole = (cloudMem.role || '').toString().toLowerCase().trim();
+                const sheetPin = normalizePin(cloudMem.pin);
 
-              // নিশ্চিতকরণ: শুধুমাত্র ১১০৫, ১১০২ এবং ১১০৯ দায়িত্বশীল অ্যাডমিন একাউন্ট
-              if (mid === '1105') {
-                cloudMem.role = sheetRole || 'super_admin';
-                cloudMem.pin = sheetPin || '1105';
-              } else if (mid === '1102') {
-                cloudMem.role = sheetRole || 'finance,members';
-                cloudMem.pin = sheetPin || '1102';
-              } else if (mid === '1109') {
-                cloudMem.role = sheetRole || 'library,members';
-                cloudMem.pin = sheetPin || '1109';
-              } else {
-                // বাকি সকল সাধারণ সদস্য strictly viewer এবং কোনো এডমিন পিন থাকবে না
-                cloudMem.role = 'viewer';
-                cloudMem.pin = '';
-              }
-            });
-            state.members = data.members;
+                if (mid === '1105') {
+                  cloudMem.role = sheetRole || 'super_admin';
+                  cloudMem.pin = sheetPin || '1105';
+                } else if (mid === '1102') {
+                  cloudMem.role = sheetRole || 'finance,members';
+                  cloudMem.pin = sheetPin || '1102';
+                } else if (mid === '1109') {
+                  cloudMem.role = sheetRole || 'library,members';
+                  cloudMem.pin = sheetPin || '1109';
+                } else {
+                  cloudMem.role = sheetRole || 'viewer';
+                  cloudMem.pin = sheetPin || '';
+                }
+              });
+              state.members = validCloudMembers;
+              localStorage.setItem('al_falah_members', JSON.stringify(state.members));
+            }
           }
           if (data.subscriptions && data.subscriptions.length > 0) state.subscriptions = data.subscriptions;
           if (data.expenses && data.expenses.length > 0) state.expenses = data.expenses;
@@ -2894,6 +2897,11 @@ const DEFAULT_HOME_SETTINGS = {
     function renderMembers() {
       const container = document.getElementById('membersGrid');
       if (!container) return;
+
+      // সেফটি গার্ড: যদি কোনো কারণে state.members খালি থাকে, তবে লোকাল স্টোরেজ বা INITIAL_MEMBERS থেকে লোড
+      if (!state.members || state.members.length === 0) {
+        state.members = JSON.parse(localStorage.getItem('al_falah_members') || 'null') || [...INITIAL_MEMBERS];
+      }
 
       const q = (document.getElementById('memberSearchInput')?.value || '').toLowerCase().trim();
 
@@ -3722,10 +3730,19 @@ const DEFAULT_HOME_SETTINGS = {
       const select = document.getElementById('authMemberSelect');
       if (!select) return;
 
-      // STRICT AUTH: শুধুমাত্র অনুমোদিত ৩ জন দায়িত্বশীল নির্বাহী (১১০৫, ১১০২, ১১০৯) লগইন ড্রপডাউনে থাকবেন
+      // যদি কোনো কারণে state.members খালি থাকে, তবে তাৎক্ষণিক INITIAL_MEMBERS থেকে রিস্টোর
+      if (!state.members || state.members.length === 0) {
+        state.members = [...INITIAL_MEMBERS];
+      }
+
+      // ১. অনুমোদিত ৩ জন দায়িত্বশীল নির্বাহী (১১০৫, ১১০২, ১১০৯)
       const AUTHORIZED_ADMIN_IDS = ['1105', '1102', '1109'];
+      let authMembers = state.members.filter(m => AUTHORIZED_ADMIN_IDS.includes(String(m.id).trim()));
       
-      const authMembers = state.members.filter(m => AUTHORIZED_ADMIN_IDS.includes(String(m.id).trim()));
+      // যদি ক্লাউড থেকে আসা মেম্বার লিস্টে এই আইডিগুলো না পাওয়া যায়, ব্যাকআপ মেম্বারস থেকে নেওয়া
+      if (authMembers.length === 0) {
+        authMembers = INITIAL_MEMBERS.filter(m => AUTHORIZED_ADMIN_IDS.includes(String(m.id).trim()));
+      }
 
       const rank = m => {
         const mid = String(m.id).trim();

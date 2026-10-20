@@ -1,6 +1,6 @@
 // Al-Falah Foundation App - Service Worker
 // অ্যাপ আপডেট করলে নিচের VERSION বদলে দিন (যেমন v2), তাহলে ফোনে নতুন ভার্সন লোড হবে।
-const VERSION = 'v2';
+const VERSION = 'v3';
 const CORE_CACHE = 'alfalah-core-' + VERSION;
 const RUNTIME_CACHE = 'alfalah-runtime-' + VERSION;
 
